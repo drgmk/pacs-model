@@ -7,6 +7,7 @@ import matplotlib.colors as colors
 from matplotlib.ticker import LogLocator, MaxNLocator, FuncFormatter
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 import argparse
+import copy
 import numpy as np
 from scipy.optimize import differential_evolution
 from scipy.ndimage import shift, rotate, map_coordinates
@@ -846,7 +847,7 @@ def run(name_image, name_psf = '', savepath = 'pacs_model/output/', name = '', d
         stellarflux = 0, boxsize = 13, hires_scale = 3, alpha = 1.5, include_unres = False,
         initial_steps = 100, nwalkers = 200, nsteps = 800, burn = 600, ra = np.nan,
         dec = np.nan, test = False, model_type = ModelType.Particle, npart = 100000,
-        query_simbad = False):
+        query_simbad = False, bg_sub=0):
     """Fit one image and save the output."""
 
     #if given no stellar flux, force an unresolved component to be added
@@ -925,6 +926,30 @@ def run(name_image, name_psf = '', savepath = 'pacs_model/output/', name = '', d
     #if requested, first check whether the image is consistent with a PSF and skip the fit if possible
     psfsub = obs.best_psf_subtraction(psf_imagesize, param_limits)
 
+    # iteratively subtract brightest source after PSF subtraction
+    if bg_sub:
+
+        # shift allowed is half image diagonal
+        pl_sub = ParamLimits(shiftmax=np.sqrt(2)*psfsub.image.shape[0]/2,
+                             fmax=None, rmax=None, imax=None)
+
+        # create Observation (since psfsub is only a Plottable)
+        sub = copy.copy(obs)
+        sub.image = psfsub.image
+        sub2 = [sub]
+
+        for i in range(bg_sub):
+                tmp1 = sub2[-1].best_psf_subtraction(psf, pl_sub)
+                tmp2 = copy.copy(obs)
+                tmp2.image = tmp1.image
+                sub2.append(tmp2)
+
+        # now replace observation and psfsub images with bg subtracted one
+        psfsub.image = tmp2.image
+        bg_mod = sub - sub2[-1]
+        obs.image -= bg_mod.image
+        
+        
     if test:
         sig, is_noise = psfsub.consistent_gaussian(radius = 15)
 
@@ -1143,6 +1168,8 @@ def parse_args():
                         help = 'name of the star, used as a figure annotation if supplied', default = '')
     parser.add_argument('-p', dest = 'psf', metavar = 'psf_file',
                         help = 'optional path to FITS file containing image to use as PSF', default = '')
+    parser.add_argument('-bg', dest = 'bg_sub', type = int, metavar = 'bg_sub',
+                        help = 'number of background sources to subtract', default = 0)
     parser.add_argument('-d', dest = 'dist', type = float, metavar = 'distance',
                         help = 'distance in pc (if not provided, disc scale will be in \'\')', default = np.nan)
     parser.add_argument('-f', dest = 'fstar', type = float, metavar = 'stellar_flux',
@@ -1200,6 +1227,7 @@ def parse_args():
     boxsize = args.boxsize
     include_unres = args.unres
     model_type_str = args.model_type
+    bg_sub = args.bg_sub
 
     if model_type_str == 'g':
         model_type = ModelType.Geometric
@@ -1223,7 +1251,7 @@ def parse_args():
     query_simbad = args.query_simbad
 
     return (name_image, name_psf, savepath, name, dist, stellarflux, boxsize, hires_scale, alpha, include_unres,
-            initial_steps, nwalkers, nsteps, burn, ra, dec, test, model_type, npart, query_simbad)
+            initial_steps, nwalkers, nsteps, burn, ra, dec, test, model_type, npart, query_simbad, bg_sub)
 
 
 #allow command-line execution
