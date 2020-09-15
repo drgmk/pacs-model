@@ -208,10 +208,11 @@ class Plottable:
         crit = result.critical_values[2]
 
         #return the significance level and whether the data are consistent with a Gaussian at that level
+        #cast as bool, otherwise will be np.bool_
         if np.isnan(radius):
-            return sig, (result.statistic < crit)
+            return sig, bool(result.statistic < crit)
         else:
-            return sig, (result.statistic < crit or self.consistent_gaussian(np.nan)[1])
+            return sig, bool(result.statistic < crit or self.consistent_gaussian(np.nan)[1])
 
 
     def _find_brightest(self, sep_threshold, centre):
@@ -376,7 +377,7 @@ class Model(Plottable):
             raise Exception(f"Invalid model type: {model_type}")
 
         (self.funres, self.fres, self.x0, self.y0,
-         self.r1, self.r2, self.inc, self.theta) = params if include_unres else np.concatenate(([0], params))
+         self.r1, self.r2, self.cosinc, self.theta) = params if include_unres else np.concatenate(([0], params))
 
         self.pfov = pfov
         self.aupp = aupp
@@ -402,7 +403,7 @@ class Model(Plottable):
         dypr = -dx * np.sin(np.deg2rad(self.theta)) + dy * np.cos(np.deg2rad(self.theta))
 
         #distances from the star to each model pixel
-        r = np.sqrt(dypr**2 + (dxpr / np.cos(np.deg2rad(self.inc)))**2)
+        r = np.sqrt(dypr**2 + (dxpr / self.cosinc)**2)
 
         #set disc flux based on r^-alpha profile
         in_disc = (r > self.r1) & (r < self.r2)
@@ -438,7 +439,7 @@ class Model(Plottable):
 
         #coordinates in the frame aligned with the major & minor axes
         dypr = r * np.cos(phi)
-        dxpr = r * np.sin(phi) * np.cos(np.deg2rad(self.inc))
+        dxpr = r * np.sin(phi) * self.cosinc
 
         #coordinates in the frame aligned with the image axes
         dx = dxpr * np.cos(np.deg2rad(self.theta)) - dypr * np.sin(np.deg2rad(self.theta)) - self.x0
@@ -794,7 +795,7 @@ def chi2(params, psf, alpha, include_unres, stellarflux, obs, param_limits, mode
         or model.r1 <= 0 or model.r2 <= 0
         or model.r1 >= model.r2
         or model.r1 > param_limits.rmax or model.r2 > param_limits.rmax
-        or model.inc < 0 or model.inc > param_limits.imax
+        or model.cosinc < 0 or model.cosinc > 1
         or abs(model.x0) > param_limits.shiftmax * obs.aupp
         or abs(model.y0) > param_limits.shiftmax * obs.aupp
         or abs(model.theta) > 90):
@@ -803,7 +804,7 @@ def chi2(params, psf, alpha, include_unres, stellarflux, obs, param_limits, mode
     #force the disc to be at least a model pixel wide if using the geometric model, otherwise
     #unphysical models with just a few pixels scattered around the image can result
     if model_type == ModelType.Geometric:
-        dr_pix = (model.r2 - model.r1) * np.cos(np.deg2rad(model.inc)) * (psf.hires_scale / obs.aupp)
+        dr_pix = (model.r2 - model.r1) * model.cosinc * (psf.hires_scale / obs.aupp)
         if (dr_pix <= 1):
             return np.inf
 
@@ -822,7 +823,7 @@ def log_probability(params, *args):
 
 def save_params(savepath, resolved, include_unres = None, max_likelihood = None, median = None,
                 lower_uncertainty = None, upper_uncertainty = None, model_consistent = None,
-                in_au = None, stellarflux = None):
+                in_au = None, stellarflux = None, psf_obsid = None):
     """Save the main results of the fit in a pickle file."""
 
     dict = {
@@ -834,7 +835,8 @@ def save_params(savepath, resolved, include_unres = None, max_likelihood = None,
         'upper_uncertainty': upper_uncertainty,
         'model_consistent': model_consistent,
         'in_au': in_au,
-        'stellarflux': stellarflux
+        'stellarflux': stellarflux,
+        'psf_obsid': psf_obsid
     }
 
     with open(savepath + '/params.pickle', 'wb') as file:
@@ -974,7 +976,7 @@ def run(name_image, name_psf = '', savepath = 'pacs_model/output/', name = '', d
             plt.close(fig)
 
             #save a pickle simply indicating that no disc was resolved
-            save_params(savepath, False)
+            save_params(savepath, False, psf_obsid = psf.obsid)
 
             return
 
@@ -985,18 +987,20 @@ def run(name_image, name_psf = '', savepath = 'pacs_model/output/', name = '', d
 
     #find best-fitting parameters using differential evolution, which searches for the
     #global minimum within the parameter ranges specified by the arguments.
-    #format is [<funres,> fres, x0, y0, r1, r2, inc, theta]
+    #format is [<funres,> fres, x0, y0, r1, r2, cosinc, theta]
 
     search_space = [(0, param_limits.fmax), (0, param_limits.fmax),
                     (-param_limits.shiftmax * obs.aupp, param_limits.shiftmax * obs.aupp),
                     (-param_limits.shiftmax * obs.aupp, param_limits.shiftmax * obs.aupp),
                     (0, param_limits.rmax), (0, param_limits.rmax),
-                    (0, param_limits.imax), (-90, 90)]
+                    (np.cos(np.deg2rad(param_limits.imax)), 1), (-90, 90)]
 
     pnames = [r'$F_\mathrm{unres}\ /\ \mathrm{mJy}$', r'$F_\mathrm{res}\ /\ \mathrm{mJy}$',
               fr'$x_0\ /\ {obs.sep_unit}$', fr'$y_0\ /\ {obs.sep_unit}$',
               fr'$r_1\ /\ {obs.sep_unit}$', fr'$r_2\ /\ {obs.sep_unit}$',
-              r'$i\ /\ \mathrm{deg}$', r'$\theta\ /\ \mathrm{deg}$'] #parameter names for plot labels
+#              r'$i\ /\ \mathrm{deg}$',
+              r'$\cos i$',
+              r'$\theta\ /\ \mathrm{deg}$'] #parameter names for plot labels
 
     #if not including an unresolved flux, remove the first element of the parameter list
     if not include_unres:
@@ -1151,7 +1155,7 @@ def run(name_image, name_psf = '', savepath = 'pacs_model/output/', name = '', d
     #note that stellarflux is saved so that we can check whether it was zero & hence how to interpret
     #the model fluxes (i.e. disc flux vs total system flux)
     save_params(savepath, True, include_unres, max_likelihood, median, lower_uncertainty, upper_uncertainty,
-                is_noise, obs.in_au, stellarflux)
+                is_noise, obs.in_au, stellarflux, psf.obsid)
 
 
 def parse_args():
