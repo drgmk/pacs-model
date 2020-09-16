@@ -23,7 +23,7 @@ for row in df_in.itertuples():
         if row.chi_star >= 3:
             pacs_model.run(row.path, savepath = f'../batch_results/{row.obsid}/{row.xid}',
                            name = row.xid, dist = row.dist_pc, stellarflux = row.star_mjy,
-                           boxsize = 15, hires_scale = 3, include_unres = False,
+                           boxsize = 15, hires_scale = 5, include_unres = False, alpha = 1.5,
                            initial_steps = 100, nwalkers = 200, nsteps = 700, burn = 500,
                            ra = row.ra_obs, dec = row.de_obs, test = True,
                            model_type = pacs_model.ModelType.Particle, npart = 100000,
