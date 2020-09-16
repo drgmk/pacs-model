@@ -140,7 +140,8 @@ def congrid(a, newdims, method='linear', centre=False, minusone=False):
 ### Classes ###
 
 #A simple data structure intended to hold upper limits on model parameters
-ParamLimits = namedtuple('ParamLimits', ['fmax', 'shiftmax', 'rmax', 'imax'])
+ParamLimits = namedtuple('ParamLimits', ['fmax', 'shiftmax', 'rmax',
+                                         'imax', 'alphamin', 'alphamax'])
 
 class Plottable:
     """Class representing an astronomical image (either real or synthetic), with plotting functionality."""
@@ -377,12 +378,12 @@ class Model(Plottable):
             raise Exception(f"Invalid model type: {model_type}")
 
         (self.funres, self.fres, self.x0, self.y0,
-         self.r1, self.r2, self.cosinc, self.theta) = params if include_unres else np.concatenate(([0], params))
+         self.r1, self.r2, self.cosinc, self.theta) = params[:8] if include_unres else np.concatenate(([0], params[:7]))
+        self.alpha = params[-1] if alpha is None else alpha
 
         self.pfov = pfov
         self.aupp = aupp
         self.hires_scale = hires_scale
-        self.alpha = alpha
         self.stellarflux = stellarflux
         self.flux_factor = flux_factor
         self.shape = shape
@@ -821,7 +822,8 @@ def log_probability(params, *args):
 
 ### Main functions ###
 
-def save_params(savepath, resolved, include_unres = None, max_likelihood = None, median = None,
+def save_params(savepath, resolved, include_unres = None, include_alpha = None,
+                param_names = None, max_likelihood = None, median = None,
                 lower_uncertainty = None, upper_uncertainty = None, model_consistent = None,
                 in_au = None, stellarflux = None, psf_obsid = None):
     """Save the main results of the fit in a pickle file."""
@@ -829,6 +831,8 @@ def save_params(savepath, resolved, include_unres = None, max_likelihood = None,
     dict = {
         'resolved': resolved,
         'include_unres': include_unres,
+        'include_alpha': include_alpha,
+        'param_names': param_names,
         'max_likelihood': max_likelihood,
         'median': median,
         'lower_uncertainty': lower_uncertainty,
@@ -921,7 +925,8 @@ def run(name_image, name_psf = '', savepath = 'pacs_model/output/', name = '', d
                                fmax = 200000,                                               #mJy
                                shiftmax = 5,                                                #PACS pixels
                                rmax = min(obs.image.shape) * obs.aupp / np.sqrt(2),         #au
-                               imax = 90 if model_type == ModelType.Particle else 88        #deg
+                               imax = 90 if model_type == ModelType.Particle else 88,       #deg
+                               alphamin = 0, alphamax = 2
                               )
 
 
@@ -933,7 +938,8 @@ def run(name_image, name_psf = '', savepath = 'pacs_model/output/', name = '', d
 
         # shift allowed is half image diagonal
         pl_sub = ParamLimits(shiftmax=np.sqrt(2)*psfsub.image.shape[0]/2,
-                             fmax=None, rmax=None, imax=None)
+                             fmax=None, rmax=None, imax=None,
+                             alphamin=None, alphamax=None)
 
         # create Observation (since psfsub is only a Plottable)
         sub = copy.copy(obs)
@@ -993,20 +999,28 @@ def run(name_image, name_psf = '', savepath = 'pacs_model/output/', name = '', d
                     (-param_limits.shiftmax * obs.aupp, param_limits.shiftmax * obs.aupp),
                     (-param_limits.shiftmax * obs.aupp, param_limits.shiftmax * obs.aupp),
                     (0, param_limits.rmax), (0, param_limits.rmax),
-                    (np.cos(np.deg2rad(param_limits.imax)), 1), (-90, 90)]
+                    (np.cos(np.deg2rad(param_limits.imax)), 1), (-90, 90),
+                    (param_limits.alphamin, param_limits.alphamax)]
 
     pnames = [r'$F_\mathrm{unres}\ /\ \mathrm{mJy}$', r'$F_\mathrm{res}\ /\ \mathrm{mJy}$',
               fr'$x_0\ /\ {obs.sep_unit}$', fr'$y_0\ /\ {obs.sep_unit}$',
               fr'$r_1\ /\ {obs.sep_unit}$', fr'$r_2\ /\ {obs.sep_unit}$',
 #              r'$i\ /\ \mathrm{deg}$',
               r'$\cos i$',
-              r'$\theta\ /\ \mathrm{deg}$'] #parameter names for plot labels
+              r'$\theta\ /\ \mathrm{deg}$', r'$\alpha$'] #parameter names for plot labels
 
     #if not including an unresolved flux, remove the first element of the parameter list
     if not include_unres:
         search_space.pop(0)
         pnames.pop(0)
         pnames[0] = r'$F_\mathrm{disc}\ /\ \mathrm{mJy}$'
+
+    # likewise for last element alpha
+    include_alpha = True
+    if alpha is not None:
+        search_space.pop()
+        pnames.pop()
+        include_alpha = False
 
 
     print("Finding a suitable initial model...")
@@ -1154,7 +1168,8 @@ def run(name_image, name_psf = '', savepath = 'pacs_model/output/', name = '', d
     #finally, save the important parameters in a pickle for future analysis
     #note that stellarflux is saved so that we can check whether it was zero & hence how to interpret
     #the model fluxes (i.e. disc flux vs total system flux)
-    save_params(savepath, True, include_unres, max_likelihood, median, lower_uncertainty, upper_uncertainty,
+    save_params(savepath, True, include_unres, include_alpha, pnames,
+                max_likelihood, median, lower_uncertainty, upper_uncertainty,
                 is_noise, obs.in_au, stellarflux, psf.obsid)
 
 
@@ -1204,6 +1219,8 @@ def parse_args():
                         help = 'only fit if disc appears to be resolved')
     parser.add_argument('--unres', dest = 'unres', action = 'store_true',
                         help = 'include a component of unresolved flux in the model')
+    parser.add_argument('--fitalpha', dest = 'include_alpha', action = 'store_true',
+                        help = 'fit for alpha (surface brightness) parameter')
     parser.add_argument('--simbad', dest = 'query_simbad', action = 'store_true',
                         help = 'query simbad for sources near target and plot them')
 
@@ -1227,11 +1244,11 @@ def parse_args():
 
     #model parameters
     initial_steps = args.initial_steps
-    alpha = args.alpha
     boxsize = args.boxsize
     include_unres = args.unres
     model_type_str = args.model_type
     bg_sub = args.bg_sub
+    alpha = None if args.include_alpha else args.alpha
 
     if model_type_str == 'g':
         model_type = ModelType.Geometric
