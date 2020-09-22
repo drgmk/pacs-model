@@ -363,7 +363,10 @@ class ModelType(Enum):
 
 
 class Model(Plottable):
-    """Class representing a disc model, with capability to make synthetic images of the modelled disc."""
+    """Class representing a disc model, with capability to make synthetic images of the modelled disc.
+        
+    Seven parameters, eight with unresolved flux, nine with alpha as well.
+    """
 
     def __init__(self, params, shape, pfov, aupp, hires_scale, alpha, include_unres,
                  stellarflux, flux_factor, model_type = ModelType.Geometric, npart = 100000):
@@ -379,7 +382,7 @@ class Model(Plottable):
 
         (self.funres, self.fres, self.x0, self.y0,
          self.r1, self.r2, self.cosinc, self.theta) = params[:8] if include_unres else np.concatenate(([0], params[:7]))
-        self.alpha = params[-1] if alpha is None else alpha
+        self.alpha = params[7+include_unres] if alpha is None else alpha
 
         self.pfov = pfov
         self.aupp = aupp
