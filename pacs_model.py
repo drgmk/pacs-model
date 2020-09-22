@@ -681,7 +681,7 @@ class Observation(Plottable):
                                 self.source_names.append(r[i]['MAIN_ID'].decode())
 
 
-    def best_psf_subtraction(self, psf, param_limits):
+    def best_psf_subtraction(self, psf, param_limits, x0=0.0, y0=0.0, negative_flux=False):
         """Return the best-fitting PSF-subtracted image."""
 
         if not np.isclose(self.pfov, psf.pfov):
@@ -689,10 +689,12 @@ class Observation(Plottable):
                             f"({self.pfov:.2f} / {psf.pfov:.2f})")
 
         #note that shiftmax here is in PACS pixels
-        limits = [(-param_limits.shiftmax, param_limits.shiftmax), #x shift
-                  (-param_limits.shiftmax, param_limits.shiftmax), #y shift
-                  (0, 2 * np.amax(self.image))]                    #peak flux
+        limits = [(x0-param_limits.shiftmax, x0+param_limits.shiftmax), #x shift
+                  (y0-param_limits.shiftmax, y0+param_limits.shiftmax), #y shift
+                  (0, 2 * np.amax(self.image))]                         #peak flux
 
+        if negative_flux:
+            limits[2] = (-2 * np.amax(self.image), 2 * np.amax(self.image))
 
         result = differential_evolution(lambda p: np.sum(((self.image - psf.shifted(p)) / self.uncert) ** 2),
                                         limits)
