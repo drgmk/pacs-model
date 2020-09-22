@@ -688,7 +688,7 @@ class Observation(Plottable):
         #note that shiftmax here is in PACS pixels
         limits = [(-param_limits.shiftmax, param_limits.shiftmax), #x shift
                   (-param_limits.shiftmax, param_limits.shiftmax), #y shift
-                  (0, 2 * np.amax(self.image))]                     #peak flux
+                  (0, 2 * np.amax(self.image))]                    #peak flux
 
 
         result = differential_evolution(lambda p: np.sum(((self.image - psf.shifted(p)) / self.uncert) ** 2),
@@ -797,6 +797,8 @@ def chi2(params, psf, alpha, include_unres, stellarflux, obs, param_limits, mode
         or model.r1 >= model.r2
         or model.r1 > param_limits.rmax or model.r2 > param_limits.rmax
         or model.cosinc < 0 or model.cosinc > 1
+        or model.alpha < param_limits.alphamin
+        or model.alpha > param_limits.alphamax
         or abs(model.x0) > param_limits.shiftmax * obs.aupp
         or abs(model.y0) > param_limits.shiftmax * obs.aupp
         or abs(model.theta) > 90):
@@ -825,7 +827,7 @@ def log_probability(params, *args):
 def save_params(savepath, resolved, include_unres = None, include_alpha = None,
                 param_names = None, max_likelihood = None, median = None,
                 lower_uncertainty = None, upper_uncertainty = None, model_consistent = None,
-                in_au = None, stellarflux = None, psf_obsid = None):
+                in_au = None, stellarflux = None, psf_obsid = None, psffit_flux = None):
     """Save the main results of the fit in a pickle file."""
 
     dict = {
@@ -840,7 +842,8 @@ def save_params(savepath, resolved, include_unres = None, include_alpha = None,
         'model_consistent': model_consistent,
         'in_au': in_au,
         'stellarflux': stellarflux,
-        'psf_obsid': psf_obsid
+        'psf_obsid': psf_obsid,
+        'psffit_flux': psffit_flux
     }
 
     with open(savepath + '/params.pickle', 'wb') as file:
@@ -932,6 +935,7 @@ def run(name_image, name_psf = '', savepath = 'pacs_model/output/', name = '', d
 
     #if requested, first check whether the image is consistent with a PSF and skip the fit if possible
     psfsub = obs.best_psf_subtraction(psf_imagesize, param_limits)
+    psffit_flux = np.sum( (obs - psfsub).image ) * obs.flux_factor
 
     # iteratively subtract brightest source after PSF subtraction
     if bg_sub:
@@ -982,7 +986,7 @@ def run(name_image, name_psf = '', savepath = 'pacs_model/output/', name = '', d
             plt.close(fig)
 
             #save a pickle simply indicating that no disc was resolved
-            save_params(savepath, False, psf_obsid = psf.obsid)
+            save_params(savepath, False, psf_obsid = psf.obsid, psffit_flux = psffit_flux)
 
             return
 
@@ -1089,8 +1093,8 @@ def run(name_image, name_psf = '', savepath = 'pacs_model/output/', name = '', d
         ax[i].set_xlim(0, nsteps - 1)
 
     plt.tight_layout(h_pad = 0.5)
-    fig.savefig(savepath + '/chains.pdf')
-    fig.savefig(savepath + '/chains.png', dpi = 150)
+#    fig.savefig(savepath + '/chains.pdf')
+    fig.savefig(savepath + '/chains.png', dpi = 50)
     plt.close(fig)
 
 
@@ -1099,7 +1103,7 @@ def run(name_image, name_psf = '', savepath = 'pacs_model/output/', name = '', d
     #make the corner plot
     fig = corner.corner(samples, quantiles = [0.16, 0.50, 0.84],
                         labels = pnames, show_titles = True, title_fmt = '.1f')
-    fig.savefig(savepath + '/corner.pdf')
+#    fig.savefig(savepath + '/corner.pdf')
     fig.savefig(savepath + '/corner.png', dpi = 150)
     plt.close(fig)
 
@@ -1170,7 +1174,7 @@ def run(name_image, name_psf = '', savepath = 'pacs_model/output/', name = '', d
     #the model fluxes (i.e. disc flux vs total system flux)
     save_params(savepath, True, include_unres, include_alpha, pnames,
                 max_likelihood, median, lower_uncertainty, upper_uncertainty,
-                is_noise, obs.in_au, stellarflux, psf.obsid)
+                is_noise, obs.in_au, stellarflux, psf.obsid, psffit_flux)
 
 
 def parse_args():
