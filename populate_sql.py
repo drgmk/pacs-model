@@ -57,9 +57,10 @@ for f in fs:
 
     if r['max_likelihood'] is None:
         sql = ("INSERT INTO resolved_fitting "
-               "(obsid, name, resolved, psf_obsid)"
-               "VALUES ({},'{}',{},{})"
-               ";".format(obsid, name, r['resolved'].real, r['psf_obsid'])
+               "(obsid, name, resolved, psf_obsid, psffit_flux)"
+               "VALUES ({},'{}',{},{},{})"
+               ";".format(obsid, name, r['resolved'].real,
+                          r['psf_obsid'], r['psffit_flux'])
                )
     else:
         p = r['median']
@@ -71,16 +72,16 @@ for f in fs:
             e_p = np.insert(e_p, 0, 0)
 
         sql = ("INSERT INTO resolved_fitting "
-               "(obsid, name, resolved, include_unres, in_au, fit_ok, psf_obsid,"
+               "(obsid, name, resolved, include_unres, in_au, fit_ok, psf_obsid, psffit_flux"
                "fstar_mjy,"
                "funres, fres, x0, y0, r1, r2, cosinc, theta,"
                "e_funres, e_fres, e_x0, e_y0, e_r1, e_r2, e_cosinc, e_theta) "
-               "VALUES ({},'{}',{},{},{},{},{},{},"
+               "VALUES ({},'{}',{},{},{},{},{},{},{}"
                "{},{},{},{},{},{},{},{},"
                "{},{},{},{},{},{},{},{})"
                ";".format(obsid, name, r['resolved'].real, r['include_unres'].real,
-                          r['in_au'].real, bool(r['model_consistent']).real, r['psf_obsid'],
-                          r['stellarflux'],
+                          r['in_au'].real, bool(r['model_consistent']).real,
+                          r['psf_obsid'], r['psffit_flux'], r['stellarflux'],
                           *p, *e_p)
               )
 
