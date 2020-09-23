@@ -9,7 +9,7 @@ from mpl_toolkits.axes_grid1 import make_axes_locatable
 import argparse
 import copy
 import numpy as np
-from scipy.optimize import differential_evolution
+from scipy.optimize import differential_evolution, minimize
 from scipy.ndimage import shift, rotate, map_coordinates
 import scipy.interpolate
 from scipy.stats import anderson
@@ -505,7 +505,8 @@ class Observation(Plottable):
     """Class representing a PACS observation. Stores the image and important associated metadata."""
 
     def __init__(self, filename, search_radius = 5, target_ra = np.nan, target_dec = np.nan, dist = np.nan,
-                 boxsize = 13, hires_scale = 1, rotate_to = np.nan, normalize = False, query_simbad = False):
+                 boxsize = 13, hires_scale = 1, rotate_to = np.nan, normalize = False, psf = None,
+                 query_simbad = False):
         """Load in an image, store some important parameters and perform initial image processing."""
 
         with fits.open(filename) as fitsfile:
@@ -577,12 +578,27 @@ class Observation(Plottable):
         sep_threshold_rms = 15 #arcsec
         sky_separation = self._projected_sep_array(brightest_pix)
 
-        self.rms = self._estimate_background((cov > cov_threshold_rms * np.max(cov)) &
-                                             (sky_separation > sep_threshold_rms))
+        bg_condition = (cov > cov_threshold_rms * np.max(cov)) & \
+                       (sky_separation > sep_threshold_rms)
+        self.rms, self.median = self._estimate_background(bg_condition)
+                                                          
+        #subtract the median from the image
+        self.image -= self.median
+        
+        # if given a PSF object, compute the rms for point sources
+        # use this to estimate pixel rms using beam area
+        if psf:
+            print('Generating PSF fit uncertainty map...')
+            self.psffit_map = self._point_source_uncertainty(psf, condition=bg_condition)
+            tmp = copy.copy(self)
+            tmp.image = self.psffit_map
+            self.psf_rms, _ = tmp._estimate_background()
+            self.psf_rms *= self.flux_factor
+            self.uncert = self.psf_rms * np.sqrt(np.max(psf.image/np.sum(psf.image)))
 
         #need to scale up uncertainties since noise is correlated
-        natural_pixsize = 3.2 #always the case for PACS 70/100 micron images
-        self.uncert = self.rms * self._correlated_noise_factor(natural_pixsize)
+#        natural_pixsize = 3.2 #always the case for PACS 70/100 micron images
+#        self.uncert = self.rms * self._correlated_noise_factor(natural_pixsize)
 
 
         if np.isnan(rotate_to):
@@ -739,10 +755,13 @@ class Observation(Plottable):
         -------
         float
             Estimated background RMS.
+        float
+            Estimated background median.
         """
 
         data = self.image.flatten() if condition is None else self.image[condition]
         rms = np.std(data)
+        median = np.median(data)
 
         #arbitrarily set error to >tol so that the iterations can get started
         err = 2 * tol
@@ -752,8 +771,9 @@ class Observation(Plottable):
             rmsprev = rms
 
             #discard data classified as outliers
-            data = data[data < sigma_level * rms]
+            data = data[data < (sigma_level * rms + median)]
             rms = np.std(data)
+            median = np.median(data)
 
             err = abs((rms - rmsprev) / rmsprev)
             i += 1
@@ -762,7 +782,43 @@ class Observation(Plottable):
             warnings.warn(f"_estimate_background did not converge after {max_iter} iterations."
                           " You may wish to check the image for issues.", stacklevel = 2)
 
-        return rms
+        return rms, median
+
+
+    def _point_source_uncertainty(self, psf, condition = None):
+        """Calculate an uncertainty map for point sources.
+        
+        PSF image is padded with zeros to size of self.image
+        If condition is set, the output will not be reshaped into a map.
+        """
+    
+        imsz = self.image.shape
+        psfsz = psf.image.shape
+        psf_tmp = copy.copy(psf)
+        if psfsz[0] < imsz[0]:
+            psf_tmp_im = np.zeros(self.image.shape)
+            diffx2 = (imsz[0] - psfsz[0])//2
+            diffy2 = (imsz[1] - psfsz[1])//2
+            psf_tmp_im[diffx2:diffx2+psfsz[0], diffy2:diffy2+psfsz[1]] = psf.image
+            psf_tmp.image = psf_tmp_im
+    
+        if condition is not None:
+            xs, ys = np.where(condition)
+        else:
+            y,x = np.meshgrid(np.arange(self.image.shape[1]),
+                              np.arange(self.image.shape[0]))
+            xs = x.reshape(-1)
+            ys = y.reshape(-1)
+        
+        with Pool() as pool:
+            flux = pool.starmap(fit_one_psf, zip(np.repeat(self,len(xs)),
+                                                 np.repeat(psf_tmp,len(xs)),
+                                                 xs,ys))
+
+        if condition is not None:
+            return np.array(flux)
+        else:
+            return np.array(flux).reshape(self.image.shape)
 
 
     def _correlated_noise_factor(self, natural_pixsize):
@@ -785,6 +841,15 @@ class Observation(Plottable):
             return r / (1.0 - 1.0 / (3.0 * r))
         else:
             return 1.0 / (1.0 - r / 3.0)
+
+
+def fit_one_psf(obs, psf, i, j):
+    """Used by _point_source_uncertainty."""
+    x0 = i - obs.image.shape[0]/2
+    y0 = j - obs.image.shape[1]/2
+    result = minimize(lambda p: np.sum(((obs.image - psf.shifted([x0,y0,p[0]])) / obs.rms) ** 2),
+                          [obs.image[i,j]], method='Nelder-Mead')
+    return np.sum(psf.shifted([x0,y0,result['x'][0]]))
 
 
 ### Functions used for model fitting ###
@@ -832,7 +897,8 @@ def log_probability(params, *args):
 def save_params(savepath, resolved, include_unres = None, include_alpha = None,
                 param_names = None, max_likelihood = None, median = None,
                 lower_uncertainty = None, upper_uncertainty = None, model_consistent = None,
-                in_au = None, stellarflux = None, psf_obsid = None, psffit_flux = None):
+                in_au = None, stellarflux = None, psf_obsid = None,
+                psffit_flux = None, psffit_rms = None, pixel_rms = None):
     """Save the main results of the fit in a pickle file."""
 
     dict = {
@@ -848,7 +914,9 @@ def save_params(savepath, resolved, include_unres = None, include_alpha = None,
         'in_au': in_au,
         'stellarflux': stellarflux,
         'psf_obsid': psf_obsid,
-        'psffit_flux': psffit_flux
+        'psffit_flux': psffit_flux,
+        'psffit_rms': psffit_rms,
+        'pixel_rms': pixel_rms
     }
 
     with open(savepath + '/params.pickle', 'wb') as file:
@@ -870,16 +938,9 @@ def run(name_image, name_psf = '', savepath = 'pacs_model/output/', name = '', d
         warnings.warn("No stellar flux was supplied. Forcing the model to include an unresolved flux.",
                       stacklevel = 2)
 
-    obs = Observation(name_image, target_ra = ra, target_dec = dec, dist = dist, boxsize = boxsize,
-                      query_simbad = query_simbad)
-
-    #put the star name, distance, obsid/level & wavelength together into an annotation for the image
-    annotation = '\n'.join([f'{obs.wav} μm image (level {(obs.level / 10):g})',
-                            f'ObsID: {obs.obsid}',
-                            name if name != '' else obs.name])
-
-    if not np.isnan(dist):
-        annotation += f' (at {dist:.1f} pc)'
+    # get the data, to get the wavelength and level, we will re-get below
+    # when we have the PSF
+    obs = Observation(name_image, target_ra = ra, target_dec = dec, dist = dist, boxsize = boxsize)
 
     #if no PSF is provided, select one based on the processing level and wavelength
     if name_psf == '':
@@ -913,11 +974,22 @@ def run(name_image, name_psf = '', savepath = 'pacs_model/output/', name = '', d
     if not np.isclose(psf.pfov, obs.pfov):
         raise Exception(f"PSF and image pixel sizes do not match ({psf.pfov:.2f} / {obs.pfov:.2f})")
 
-    #issue a warning if the image and PSF are at different wavelengths
+    #abort if the image and PSF are at different wavelengths
     if psf.wav != obs.wav:
-        warnings.warn("The wavelength of the supplied PSF does not match that of the image"
-                      f" ({psf.wav} / {obs.wav})",
-                      stacklevel = 2)
+        raise Exception("The wavelength of the supplied PSF does not match that of the image"
+                        f" ({psf.wav} / {obs.wav})")
+
+    #now get the observation again, using the PSF to estimate uncertainty
+    obs = Observation(name_image, target_ra = ra, target_dec = dec, dist = dist, boxsize = boxsize,
+                      query_simbad = query_simbad, psf=psf)
+
+    #put the star name, distance, obsid/level & wavelength together into an annotation for the image
+    annotation = '\n'.join([f'{obs.wav} μm image (level {(obs.level / 10):g})',
+                            f'ObsID: {obs.obsid}',
+                            name if name != '' else obs.name])
+
+    if not np.isnan(dist):
+        annotation += f' (at {dist:.1f} pc)'
 
     #ensure that the output directory exists
     if not os.path.exists(savepath):
@@ -991,7 +1063,8 @@ def run(name_image, name_psf = '', savepath = 'pacs_model/output/', name = '', d
             plt.close(fig)
 
             #save a pickle simply indicating that no disc was resolved
-            save_params(savepath, False, psf_obsid = psf.obsid, psffit_flux = psffit_flux)
+            save_params(savepath, False, psf_obsid = psf.obsid, psffit_flux = psffit_flux,
+                        psffit_rms = obs.psf_rms, pixel_rms = obs.pixel_rms)
 
             return
 
@@ -1179,7 +1252,8 @@ def run(name_image, name_psf = '', savepath = 'pacs_model/output/', name = '', d
     #the model fluxes (i.e. disc flux vs total system flux)
     save_params(savepath, True, include_unres, include_alpha, pnames,
                 max_likelihood, median, lower_uncertainty, upper_uncertainty,
-                is_noise, obs.in_au, stellarflux, psf.obsid, psffit_flux)
+                is_noise, obs.in_au, stellarflux, psf.obsid, psffit_flux,
+                obs.psf_rms, obs.rms)
 
 
 def parse_args():
