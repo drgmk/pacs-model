@@ -1064,7 +1064,7 @@ def run(name_image, name_psf = '', savepath = 'pacs_model/output/', name = '', d
 
             #save a pickle simply indicating that no disc was resolved
             save_params(savepath, False, psf_obsid = psf.obsid, psffit_flux = psffit_flux,
-                        psffit_rms = obs.psf_rms, pixel_rms = obs.pixel_rms)
+                        psffit_rms = obs.psf_rms, pixel_rms = obs.rms)
 
             return
 

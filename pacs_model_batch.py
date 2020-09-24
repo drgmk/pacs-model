@@ -2,12 +2,15 @@ import pacs_model
 import pandas as pd
 import numpy as np
 from pathlib import Path
+import sys
 
 """Run pacs_model on a batch of systems."""
 
+csv_filename = sys.argv[1]
+output_path = sys.argv[2]
 
 #input file can be generated with get_obs_paths.ipynb
-csv_filename = 'input/obs_path_list.csv'
+#csv_filename = 'input/obs_path_list.csv'
 df_in = pd.read_csv(csv_filename)
 
 #the two lines below can be used to select certain systems to fit
@@ -21,7 +24,7 @@ for row in df_in.itertuples():
 
     try:
         if row.chi_star >= 3:
-            pacs_model.run(row.path, savepath = f'../batch_results/{row.obsid}/{row.xid}',
+            pacs_model.run(row.path, savepath = f'{output_path}/{row.obsid}/{row.xid}',
                            name = row.xid, dist = row.dist_pc, stellarflux = row.star_mjy,
                            boxsize = 15, hires_scale = 5, include_unres = False, alpha = 1.5,
                            initial_steps = 100, nwalkers = 200, nsteps = 700, burn = 500,
