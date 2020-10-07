@@ -2,6 +2,7 @@ import numpy as np
 import mysql.connector
 import pickle
 import glob
+import sys
 
 # create table with
 '''
@@ -34,6 +35,9 @@ CREATE TABLE `resolved_fitting` (
                                  ) ENGINE=MyISAM DEFAULT CHARSET=latin1;
 '''
 
+# get location of batch output
+batch_path = sys.argv[1]
+
 # set up connection
 try:
     cnx = mysql.connector.connect(user='grant',
@@ -45,46 +49,64 @@ try:
 except mysql.connector.InterfaceError:
     print("Can't connect")
 
-fs = glob.glob('batch_results/*/*/params.pickle')
+fs = glob.glob('{}/*/*/params.pickle'.format(batch_path))
 
 for f in fs:
-    obsid = f.split('/')[1]
-    name = f.split('/')[2]
+
     with open(f,'rb') as file:
         r = pickle.load(file)
 
-#    print(r)
+    obsid = f.split('/')[-3]
+    name = f.split('/')[-2]
 
-    if r['max_likelihood'] is None:
+
+    print(r)
+
+    if not r['resolved']:
         sql = ("INSERT INTO resolved_fitting "
-               "(obsid, name, resolved, psf_obsid, psffit_flux)"
-               "VALUES ({},'{}',{},{},{})"
+               "(obsid, name, resolved, psf_obsid, psffit_flux, "
+               "psffit_rms, pixel_rms)"
+               "VALUES ({},'{}',{},{},{},{},{})"
                ";".format(obsid, name, r['resolved'].real,
-                          r['psf_obsid'], r['psffit_flux'])
+                          r['psf_obsid'], r['psffit_flux'],
+                          r['psffit_rms'], r['pixel_rms'])
                )
     else:
         p = r['median']
-        if len(p) == 7:
-            p = np.insert(p, 0, 0)
-
+        
         e_p = (r['upper_uncertainty'] + r['lower_uncertainty']) / 2
-        if len(e_p) == 7:
+        if not r['include_unres']:
+            p = np.insert(p, 0, 0)
             e_p = np.insert(e_p, 0, 0)
 
+        if r['include_alpha']:
+            alpha = r['median'][7+r['include_unres']]
+            e_alpha = e_p[7+r['include_unres']]
+        else:
+            alpha = r['alpha']
+            e_alpha = 0
+
         sql = ("INSERT INTO resolved_fitting "
-               "(obsid, name, resolved, include_unres, in_au, fit_ok, psf_obsid, psffit_flux"
-               "fstar_mjy,"
+               "(obsid, name, resolved, include_unres, include_alpha,"
+               "in_au, fit_ok, psf_obsid,"
+               "psffit_flux, psffit_rms, pixel_rms,"
+               "fstar_mjy, alpha, e_alpha,"
                "funres, fres, x0, y0, r1, r2, cosinc, theta,"
                "e_funres, e_fres, e_x0, e_y0, e_r1, e_r2, e_cosinc, e_theta) "
-               "VALUES ({},'{}',{},{},{},{},{},{},{}"
+               "VALUES ({},'{}',{},{},{},"
+               "{},{},{},"
+               "{},{},{},"
+               "{},{},{},"
                "{},{},{},{},{},{},{},{},"
                "{},{},{},{},{},{},{},{})"
-               ";".format(obsid, name, r['resolved'].real, r['include_unres'].real,
-                          r['in_au'].real, bool(r['model_consistent']).real,
-                          r['psf_obsid'], r['psffit_flux'], r['stellarflux'],
+               ";".format(obsid, name, r['resolved'].real,r['include_unres'].real, r['include_alpha'].real,
+                          r['in_au'].real, r['fit_ok'].real, r['psf_obsid'],
+                          r['psffit_flux'], r['psffit_rms'], r['pixel_rms'],
+                          r['stellarflux'], alpha, e_alpha,
                           *p, *e_p)
               )
 
+    print(sql)
     cursor.execute(sql)
     cnx.commit()
     
