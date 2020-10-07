@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as np
 from pathlib import Path
 import sys
+import os
 
 """Run pacs_model on a batch of systems."""
 
@@ -22,9 +23,14 @@ num = len(df_in)
 for row in df_in.itertuples():
     print(f'Performing fit number {row.Index + 1} of {num} ({row.obsid} / {row.xid})...')
 
+    savepath = f'{output_path}/{row.obsid}/{row.xid}'
+    if os.path.exists(f'{savepath}/params.pickle'):
+        print(f' fit done for {row.xid}, skipping')
+        continue
+
     try:
         if row.chi_star >= 3:
-            pacs_model.run(row.path, savepath = f'{output_path}/{row.obsid}/{row.xid}',
+            pacs_model.run(row.path, savepath = savepath,
                            name = row.xid, dist = row.dist_pc, stellarflux = row.star_mjy,
                            boxsize = 15, hires_scale = 5, include_unres = False, alpha = 1.5,
                            initial_steps = 100, nwalkers = 200, nsteps = 700, burn = 500,
