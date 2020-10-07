@@ -30,7 +30,7 @@ for row in df_in.itertuples():
                            initial_steps = 100, nwalkers = 200, nsteps = 700, burn = 500,
                            ra = row.ra_obs, dec = row.de_obs, test = True,
                            model_type = pacs_model.ModelType.Particle, npart = 100000,
-                           query_simbad = False)
+                           query_simbad = True, bg_sub=row.n_bg)
         else:
             print(f"Proceeding to next system (no significant excess: chi = {row.chi_star:.2f})")
 
