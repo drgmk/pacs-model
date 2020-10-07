@@ -592,9 +592,9 @@ class Observation(Plottable):
             self.psffit_map = self._point_source_uncertainty(psf, condition=bg_condition)
             tmp = copy.copy(self)
             tmp.image = self.psffit_map
-            self.psf_rms, _ = tmp._estimate_background()
-            self.psf_rms *= self.flux_factor
-            self.uncert = self.psf_rms * np.sqrt(np.max(psf.image/np.sum(psf.image)))
+            self.psffit_rms, _ = tmp._estimate_background()
+            self.psffit_rms *= self.flux_factor
+            self.uncert = self.psffit_rms * np.sqrt(np.max(psf.image/np.sum(psf.image)))
 
         #need to scale up uncertainties since noise is correlated
 #        natural_pixsize = 3.2 #always the case for PACS 70/100 micron images
@@ -894,7 +894,12 @@ def log_probability(params, *args):
 
 ### Main functions ###
 
-def save_params(savepath, resolved, include_unres = None, include_alpha = None,
+def save_params_dict(savepath, dict):
+    with open(savepath + '/params.pickle', 'wb') as file:
+        pickle.dump(dict, file, protocol = pickle.HIGHEST_PROTOCOL)
+
+
+def save_params(savepath, resolved, include_unres = None, include_alpha = None, alpha = None,
                 param_names = None, max_likelihood = None, median = None,
                 lower_uncertainty = None, upper_uncertainty = None, model_consistent = None,
                 in_au = None, stellarflux = None, psf_obsid = None,
@@ -905,6 +910,7 @@ def save_params(savepath, resolved, include_unres = None, include_alpha = None,
         'resolved': resolved,
         'include_unres': include_unres,
         'include_alpha': include_alpha,
+        'alpha': alpha,
         'param_names': param_names,
         'max_likelihood': max_likelihood,
         'median': median,
@@ -919,10 +925,7 @@ def save_params(savepath, resolved, include_unres = None, include_alpha = None,
         'pixel_rms': pixel_rms
     }
 
-    with open(savepath + '/params.pickle', 'wb') as file:
-        pickle.dump(dict, file, protocol = pickle.HIGHEST_PROTOCOL)
-
-    return
+    save_params_dict(savepath, dict)
 
 
 def run(name_image, name_psf = '', savepath = 'pacs_model/output/', name = '', dist = np.nan,
@@ -931,12 +934,23 @@ def run(name_image, name_psf = '', savepath = 'pacs_model/output/', name = '', d
         dec = np.nan, test = False, model_type = ModelType.Particle, npart = 100000,
         query_simbad = False, bg_sub=0):
     """Fit one image and save the output."""
+    
+    # dict where we will save output
+    save = {}
+    save['image_filename'] = os.path.basename(name_image)
+    save['distance'] = dist
+    save['ra'] = ra
+    save['dec'] = dec
+    save['n_bg_sub'] = bg_sub
+    save['stellarflux'] = stellarflux
 
     #if given no stellar flux, force an unresolved component to be added
     if (stellarflux == 0 or np.isnan(stellarflux)) and not include_unres:
         include_unres = True
         warnings.warn("No stellar flux was supplied. Forcing the model to include an unresolved flux.",
                       stacklevel = 2)
+
+    save['include_unres'] = include_unres
 
     # get the data, to get the wavelength and level, we will re-get below
     # when we have the PSF
@@ -967,6 +981,9 @@ def run(name_image, name_psf = '', savepath = 'pacs_model/output/', name = '', d
     psf = Observation(name_psf, boxsize = 13, hires_scale = hires_scale, rotate_to = obs.angle,
                       normalize = True)
 
+    save['psf_filename'] = os.path.basename(name_psf)
+    save['psf_obsid'] = psf.obsid
+
     #however, we need to store a PSF with the same dimension as the image for the initial subtraction
     psf_imagesize = Observation(name_psf, boxsize = boxsize, rotate_to = obs.angle, normalize = True)
 
@@ -982,6 +999,13 @@ def run(name_image, name_psf = '', savepath = 'pacs_model/output/', name = '', d
     #now get the observation again, using the PSF to estimate uncertainty
     obs = Observation(name_image, target_ra = ra, target_dec = dec, dist = dist, boxsize = boxsize,
                       query_simbad = query_simbad, psf=psf)
+
+    save['image_obsid'] = obs.obsid
+    save['wavelength'] = obs.wav
+    save['image_level'] = obs.level
+    save['psffit_rms'] = obs.psffit_rms
+    save['pixel_rms'] = obs.rms
+    save['in_au'] = obs.in_au
 
     #put the star name, distance, obsid/level & wavelength together into an annotation for the image
     annotation = '\n'.join([f'{obs.wav} μm image (level {(obs.level / 10):g})',
@@ -1013,8 +1037,10 @@ def run(name_image, name_psf = '', savepath = 'pacs_model/output/', name = '', d
     #if requested, first check whether the image is consistent with a PSF and skip the fit if possible
     psfsub = obs.best_psf_subtraction(psf_imagesize, param_limits)
     psffit_flux = np.sum( (obs - psfsub).image ) * obs.flux_factor
+    save['psffit_flux'] = psffit_flux
 
     # iteratively subtract brightest source after PSF subtraction
+    save['bg_fluxes'] = np.array([])
     if bg_sub:
 
         # shift allowed is half image diagonal
@@ -1036,11 +1062,13 @@ def run(name_image, name_psf = '', savepath = 'pacs_model/output/', name = '', d
         # now replace observation and psfsub images with bg subtracted one
         psfsub.image = tmp2.image
         bg_mod = sub - sub2[-1]
+        save['bg_fluxes'] = np.append(save['bg_fluxes'], np.sum(bg_mod.image))
         obs.image -= bg_mod.image
         
         
     if test:
         sig, is_noise = psfsub.consistent_gaussian(radius = 15)
+        save['resolved'] = not is_noise
 
         if is_noise:
             print(f"The PSF subtraction is consistent with Gaussian noise at the {sig:.0f}% level."
@@ -1063,8 +1091,9 @@ def run(name_image, name_psf = '', savepath = 'pacs_model/output/', name = '', d
             plt.close(fig)
 
             #save a pickle simply indicating that no disc was resolved
-            save_params(savepath, False, psf_obsid = psf.obsid, psffit_flux = psffit_flux,
-                        psffit_rms = obs.psf_rms, pixel_rms = obs.rms)
+            save_params_dict(savepath, save)
+#            save_params(savepath, False, psf_obsid = psf.obsid, psffit_flux = psffit_flux,
+#                        psffit_rms = obs.psffit_rms, pixel_rms = obs.rms)
 
             return
 
@@ -1091,6 +1120,8 @@ def run(name_image, name_psf = '', savepath = 'pacs_model/output/', name = '', d
               r'$\cos i$',
               r'$\theta\ /\ \mathrm{deg}$', r'$\alpha$'] #parameter names for plot labels
 
+    save['param_names'] = pnames
+
     #if not including an unresolved flux, remove the first element of the parameter list
     if not include_unres:
         search_space.pop(0)
@@ -1104,6 +1135,7 @@ def run(name_image, name_psf = '', savepath = 'pacs_model/output/', name = '', d
         pnames.pop()
         include_alpha = False
 
+    save['include_alpha'] = include_alpha
 
     print("Finding a suitable initial model...")
 
@@ -1238,6 +1270,7 @@ def run(name_image, name_psf = '', savepath = 'pacs_model/output/', name = '', d
 
     #check whether the model appears to be a good fit
     sig, is_noise = residual.consistent_gaussian(radius = 15)
+    save['fit_ok'] = is_noise
 
     if is_noise:
         print(f"The residuals are consistent with Gaussian noise at the {sig:.0f}% significance level."
@@ -1250,10 +1283,15 @@ def run(name_image, name_psf = '', savepath = 'pacs_model/output/', name = '', d
     #finally, save the important parameters in a pickle for future analysis
     #note that stellarflux is saved so that we can check whether it was zero & hence how to interpret
     #the model fluxes (i.e. disc flux vs total system flux)
-    save_params(savepath, True, include_unres, include_alpha, pnames,
-                max_likelihood, median, lower_uncertainty, upper_uncertainty,
-                is_noise, obs.in_au, stellarflux, psf.obsid, psffit_flux,
-                obs.psf_rms, obs.rms)
+    save['max_likelihood'] = max_likelihood
+    save['median'] = median
+    save['lower_uncertainty'] = lower_uncertainty
+    save['upper_uncertainty'] = upper_uncertainty
+    save_params_dict(savepath, save)
+#    save_params(savepath, True, include_unres, include_alpha, alpha, pnames,
+#                max_likelihood, median, lower_uncertainty, upper_uncertainty,
+#                is_noise, obs.in_au, stellarflux, psf.obsid, psffit_flux,
+#                obs.psffit_rms, obs.rms)
 
 
 def parse_args():
