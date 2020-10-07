@@ -1054,7 +1054,7 @@ def run(name_image, name_psf = '', savepath = 'pacs_model/output/', name = '', d
         sub2 = [sub]
 
         for i in range(bg_sub):
-                tmp1 = sub2[-1].best_psf_subtraction(psf, pl_sub)
+                tmp1 = sub2[-1].best_psf_subtraction(psf_imagesize, pl_sub)
                 tmp2 = copy.copy(obs)
                 tmp2.image = tmp1.image
                 sub2.append(tmp2)
