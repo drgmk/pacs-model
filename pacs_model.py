@@ -952,8 +952,8 @@ def run(name_image, name_psf = '', savepath = 'pacs_model/output/', name = '', d
 
     save['include_unres'] = include_unres
 
-    # get the data, to get the wavelength and level, we will re-get below
-    # when we have the PSF
+    # get the data, to get the wavelength, level and rotation,
+    # we will re-get below when we have the PSF
     obs = Observation(name_image, target_ra = ra, target_dec = dec, dist = dist, boxsize = boxsize)
 
     #if no PSF is provided, select one based on the processing level and wavelength
@@ -1006,6 +1006,7 @@ def run(name_image, name_psf = '', savepath = 'pacs_model/output/', name = '', d
     save['psffit_rms'] = obs.psffit_rms
     save['pixel_rms'] = obs.rms
     save['in_au'] = obs.in_au
+    save['name'] = name if name != '' else obs.name
 
     #put the star name, distance, obsid/level & wavelength together into an annotation for the image
     annotation = '\n'.join([f'{obs.wav} μm image (level {(obs.level / 10):g})',
@@ -1136,6 +1137,7 @@ def run(name_image, name_psf = '', savepath = 'pacs_model/output/', name = '', d
         include_alpha = False
 
     save['include_alpha'] = include_alpha
+    save['alpha'] = alpha
 
     print("Finding a suitable initial model...")
 
