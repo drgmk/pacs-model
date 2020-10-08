@@ -1067,10 +1067,10 @@ def run(name_image, name_psf = '', savepath = 'pacs_model/output/', name = '', d
         obs.image -= bg_mod.image
         
         
-    if test:
-        sig, is_noise = psfsub.consistent_gaussian(radius = 15)
-        save['resolved'] = not is_noise
+    sig, is_noise = psfsub.consistent_gaussian(radius = 15)
+    save['resolved'] = not is_noise
 
+    if test:
         if is_noise:
             print(f"The PSF subtraction is consistent with Gaussian noise at the {sig:.0f}% level."
                   " There is likely not a resolved disc here. Skipping this system.")
