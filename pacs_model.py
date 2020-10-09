@@ -1218,9 +1218,13 @@ def run(name_image, name_psf = '', savepath = 'pacs_model/output/', name = '', d
     if include_unres:
         samp_pl = np.insert(samp_pl, 6, samp_pl[:,5]-samp_pl[:,4], axis=1)
         pnames_pl.insert(6, fr'$\Delta r\ /\ {obs.sep_unit}$')
+        samp_pl = np.insert(samp_pl, 6, (samp_pl[:,5]+samp_pl[:,4])/2, axis=1)
+        pnames_pl.insert(6, fr'$r_{{avg}}\ /\ {obs.sep_unit}$')
     else:
         samp_pl = np.insert(samp_pl, 5, samp_pl[:,4]-samp_pl[:,3], axis=1)
         pnames_pl.insert(5, fr'$\Delta r\ /\ {obs.sep_unit}$')
+        samp_pl = np.insert(samp_pl, 5, (samp_pl[:,4]+samp_pl[:,3])/2, axis=1)
+        pnames_pl.insert(5, fr'$r_{{avg}}\ /\ {obs.sep_unit}$')
 
     #make the corner plot
     fig = corner.corner(samp_pl, quantiles = [0.16, 0.50, 0.84],
