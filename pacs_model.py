@@ -141,7 +141,8 @@ def congrid(a, newdims, method='linear', centre=False, minusone=False):
 
 #A simple data structure intended to hold upper limits on model parameters
 ParamLimits = namedtuple('ParamLimits', ['fmax', 'shiftmax', 'rmax',
-                                         'imax', 'alphamin', 'alphamax'])
+                                         'imax', 'alphamin', 'alphamax',
+                                         'drmax'])
 
 class Plottable:
     """Class representing an astronomical image (either real or synthetic), with plotting functionality."""
@@ -874,6 +875,10 @@ def chi2(params, psf, alpha, include_unres, stellarflux, obs, param_limits, mode
         or abs(model.theta) > 90):
         return np.inf
 
+    if param_limits.drmax:
+        if model.r2 - model.r1 > param_limits.drmax:
+            return np.inf
+
     #force the disc to be at least a model pixel wide if using the geometric model, otherwise
     #unphysical models with just a few pixels scattered around the image can result
     if model_type == ModelType.Geometric:
@@ -932,7 +937,7 @@ def run(name_image, name_psf = '', savepath = 'pacs_model/output/', name = '', d
         stellarflux = 0, boxsize = 13, hires_scale = 3, alpha = 1.5, include_unres = False,
         initial_steps = 100, nwalkers = 200, nsteps = 800, burn = 600, ra = np.nan,
         dec = np.nan, test = False, model_type = ModelType.Particle, npart = 100000,
-        query_simbad = False, bg_sub=0):
+        query_simbad = False, bg_sub=0, drmax_arcsec=None):
     """Fit one image and save the output."""
     
     # dict where we will save output
@@ -943,6 +948,7 @@ def run(name_image, name_psf = '', savepath = 'pacs_model/output/', name = '', d
     save['dec'] = dec
     save['n_bg_sub'] = bg_sub
     save['stellarflux'] = stellarflux
+    save['drmax_arcsec'] = drmax_arcsec
 
     #if given no stellar flux, force an unresolved component to be added
     if (stellarflux == 0 or np.isnan(stellarflux)) and not include_unres:
@@ -1031,7 +1037,8 @@ def run(name_image, name_psf = '', savepath = 'pacs_model/output/', name = '', d
                                shiftmax = 5,                                                #PACS pixels
                                rmax = min(obs.image.shape) * obs.aupp / np.sqrt(2),         #au
                                imax = 90 if model_type == ModelType.Particle else 88,       #deg
-                               alphamin = 0, alphamax = 2
+                               alphamin = 0, alphamax = 2,
+                               drmax = drmax_arcsec*obs.aupp if drmax_arcsec else None
                               )
 
 
@@ -1047,7 +1054,7 @@ def run(name_image, name_psf = '', savepath = 'pacs_model/output/', name = '', d
         # shift allowed is half image diagonal
         pl_sub = ParamLimits(shiftmax=np.sqrt(2)*psfsub.image.shape[0]/2,
                              fmax=None, rmax=None, imax=None,
-                             alphamin=None, alphamax=None)
+                             alphamin=None, alphamax=None, drmax=None)
 
         # create Observation (since psfsub is only a Plottable)
         sub = copy.copy(obs)
@@ -1336,6 +1343,8 @@ def parse_args():
                         help = 'PACS pixel / high-res model pixel size ratio (default 5)', default = 5)
     parser.add_argument('-a', dest = 'alpha', type = float, metavar = 'alpha',
                         help = 'surface brightness profile index (d^-alpha; default 1.5)', default = 1.5)
+    parser.add_argument('--drmax', dest = 'drmax', type = float, metavar = 'drmax',
+                        help = 'restrict disk width to less than drmax in arcseconds', default = None)
     parser.add_argument('-s', dest = 'initial_steps', type = int, metavar = 'init_steps',
                         help = 'number of steps for initial optimization (default 100)', default = 100)
     parser.add_argument('-mw', dest = 'walkers', type = int, metavar = 'mcwalkers',
@@ -1386,6 +1395,7 @@ def parse_args():
     model_type_str = args.model_type
     bg_sub = args.bg_sub
     alpha = None if args.include_alpha else args.alpha
+    drmax_arcsec = args.drmax
 
     if model_type_str == 'g':
         model_type = ModelType.Geometric
@@ -1408,8 +1418,10 @@ def parse_args():
     #overplot SIMBAD sources?
     query_simbad = args.query_simbad
 
-    return (name_image, name_psf, savepath, name, dist, stellarflux, boxsize, hires_scale, alpha, include_unres,
-            initial_steps, nwalkers, nsteps, burn, ra, dec, test, model_type, npart, query_simbad, bg_sub)
+    return (name_image, name_psf, savepath, name, dist, stellarflux, boxsize,
+            hires_scale, alpha, include_unres, initial_steps, nwalkers,
+            nsteps, burn, ra, dec, test, model_type, npart, query_simbad,
+            bg_sub, drmax_arcsec)
 
 
 #allow command-line execution
