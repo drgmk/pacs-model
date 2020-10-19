@@ -719,6 +719,39 @@ class Observation(Plottable):
         return Plottable(image = self.image - psf.shifted(result['x']), pfov = self.pfov)
 
 
+    def _gaussian_image(self, p):
+        '''Return a 2d Gaussian with same dimensions as image.'''
+        x0,y0,w1,w2,th,pk = p
+        x0, y0 = x0/self.pfov, y0/self.pfov # convert to arcsec
+        w1, w2 = w1/self.pfov, w2/self.pfov
+        xx, yy = np.meshgrid(np.arange(self.image.shape[1]) - self.image.shape[1]/2,
+                             np.arange(self.image.shape[0]) - self.image.shape[0]/2)
+        x = xx * np.cos(th) - yy * np.sin(th)
+        y = xx * np.sin(th) + yy * np.cos(th)
+        return pk * np.exp( -0.5*((x-x0)**2 / (w1/2.35)**2 + \
+                                  (y-y0)**2 / (w2/2.35)**2) )
+
+
+    def best_gauss_fit(self, param_limits, x0=0.0, y0=0.0):
+        '''Find best fitting 2d Gaussian, lengths in arcsec.'''
+        
+        #distances in pixels
+        limits = [(x0-param_limits.shiftmax, x0+param_limits.shiftmax), #x shift
+                  (y0-param_limits.shiftmax, y0+param_limits.shiftmax), #y shift
+                  (4, 30), (4, 30), (0, np.pi/2),                       #
+                  (0, 2 * np.amax(self.image))]                         #peak flux
+    
+        result = differential_evolution(lambda p: np.sum(((self.image - self._gaussian_image(p)) / self.uncert) ** 2),
+                                    limits)
+                                    
+        if result['x'][2] < result['x'][3]:
+            res = result['x'][[0,1,3,2,4,5]]
+            res[4] += np.pi/2
+            return res
+        else:
+            return result['x']
+
+
     def _crop_image(self, centre, boxscale):
         """Crop self.image such that the specified pixel is perfectly centred.
 
@@ -937,7 +970,7 @@ def run(name_image, name_psf = '', savepath = 'pacs_model/output/', name = '', d
         stellarflux = 0, boxsize = 13, hires_scale = 3, alpha = 1.5, include_unres = False,
         initial_steps = 100, nwalkers = 200, nsteps = 800, burn = 600, ra = np.nan,
         dec = np.nan, test = False, model_type = ModelType.Particle, npart = 100000,
-        query_simbad = False, bg_sub=0, drmax_arcsec=None):
+        query_simbad = False, bg_sub=0, drmax_arcsec=None, gauss_fit=True):
     """Fit one image and save the output."""
     
     # dict where we will save output
@@ -1076,6 +1109,13 @@ def run(name_image, name_psf = '', savepath = 'pacs_model/output/', name = '', d
         
     sig, is_noise = psfsub.consistent_gaussian(radius = 15)
     save['resolved'] = not is_noise
+
+    #do the gaussian fit, after bg subtraction in case this helps
+    save['gauss_fit'] = gauss_fit
+    if gauss_fit:
+        res = obs.best_gauss_fit(param_limits)
+        save['gauss_fit_parameters'] = res
+        save['gauss_fit_flux'] = np.sum(obs._gaussian_image(res))
 
     if test:
         if is_noise:
@@ -1363,6 +1403,8 @@ def parse_args():
                         help = 'number of particles if using model p (default 100000)', default = 100000)
     parser.add_argument('--test', dest = 'testres', action = 'store_true',
                         help = 'only fit if disc appears to be resolved')
+    parser.add_argument('--gaussfit', dest = 'gauss', action = 'store_true',
+                        help = 'fit 2d Gaussian at image center')
     parser.add_argument('--unres', dest = 'unres', action = 'store_true',
                         help = 'include a component of unresolved flux in the model')
     parser.add_argument('--fitalpha', dest = 'include_alpha', action = 'store_true',
@@ -1415,13 +1457,16 @@ def parse_args():
     #use PSF subtraction to test for a resolved disc?
     test = args.testres
 
+    #fit a 2d gaussian to the observation
+    gauss_fit = args.gauss
+
     #overplot SIMBAD sources?
     query_simbad = args.query_simbad
 
     return (name_image, name_psf, savepath, name, dist, stellarflux, boxsize,
             hires_scale, alpha, include_unres, initial_steps, nwalkers,
             nsteps, burn, ra, dec, test, model_type, npart, query_simbad,
-            bg_sub, drmax_arcsec)
+            bg_sub, drmax_arcsec, gauss_fit)
 
 
 #allow command-line execution
