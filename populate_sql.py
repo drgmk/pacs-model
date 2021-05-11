@@ -8,6 +8,7 @@ import sys
 '''
 CREATE TABLE `resolved_fitting` (
                                  `ObsId` int(11) NOT NULL,
+                                 `wavelength` int(3) NOT NULL,
                                  `name` varchar(50) NOT NULL DEFAULT '',
                                  `include_unres` tinyint(1) NOT NULL,
                                  `psf_obsid` int(11) NOT NULL,
@@ -43,7 +44,8 @@ try:
     cnx = mysql.connector.connect(user='grant',
                                   password='grant',
                                   host='localhost',
-                                  database='herscheldb')
+                                  database='herscheldb',
+                                  auth_plugin='mysql_native_password')
     cursor = cnx.cursor(buffered=True)
 
 except mysql.connector.InterfaceError:
@@ -64,10 +66,12 @@ for f in fs:
 
     if not r['resolved']:
         sql = ("INSERT INTO resolved_fitting "
-               "(obsid, name, resolved, psf_obsid, psffit_flux, "
+               "(obsid, name, wavelength, "
+               "resolved, psf_obsid, psffit_flux, "
                "psffit_rms, pixel_rms)"
-               "VALUES ({},'{}',{},{},{},{},{})"
-               ";".format(obsid, name, r['resolved'].real,
+               "VALUES ({},'{}',{},{},{},{},{},{})"
+               ";".format(obsid, name, r['wavelength'],
+                          r['resolved'].real,
                           r['psf_obsid'], r['psffit_flux'],
                           r['psffit_rms'], r['pixel_rms'])
                )
@@ -80,26 +84,32 @@ for f in fs:
             e_p = np.insert(e_p, 0, 0)
 
         if r['include_alpha']:
-            alpha = r['median'][7+r['include_unres']]
-            e_alpha = e_p[7+r['include_unres']]
+            alpha = p[-1]
+            e_alpha = e_p[-1]
+            p = np.delete(p, -1)
+            e_p = np.delete(e_p, -1)
         else:
             alpha = r['alpha']
             e_alpha = 0
 
         sql = ("INSERT INTO resolved_fitting "
-               "(obsid, name, resolved, include_unres, include_alpha,"
+               "(obsid, name, wavelength,"
+               "resolved, include_unres, include_alpha,"
                "in_au, fit_ok, psf_obsid,"
                "psffit_flux, psffit_rms, pixel_rms,"
                "fstar_mjy, alpha, e_alpha,"
                "funres, fres, x0, y0, r1, r2, cosinc, theta,"
                "e_funres, e_fres, e_x0, e_y0, e_r1, e_r2, e_cosinc, e_theta) "
-               "VALUES ({},'{}',{},{},{},"
+               "VALUES ({},'{}',{},"
+               "{},{},{},"
                "{},{},{},"
                "{},{},{},"
                "{},{},{},"
                "{},{},{},{},{},{},{},{},"
                "{},{},{},{},{},{},{},{})"
-               ";".format(obsid, name, r['resolved'].real,r['include_unres'].real, r['include_alpha'].real,
+               ";".format(obsid, name, r['wavelength'],
+                          r['resolved'].real,r['include_unres'].real,
+                          r['include_alpha'].real,
                           r['in_au'].real, r['fit_ok'].real, r['psf_obsid'],
                           r['psffit_flux'], r['psffit_rms'], r['pixel_rms'],
                           r['stellarflux'], alpha, e_alpha,
