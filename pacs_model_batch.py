@@ -35,7 +35,7 @@ for row in df_in.itertuples():
                            include_unres = False, drmax_arcsec = None, alpha = 1.5,
                            boxsize = 15, hires_scale = 5,
                            initial_steps = 100, nwalkers = 200, nsteps = 700, burn = 500,
-                           ra = row.ra_obs, dec = row.de_obs, test = True,
+                           ra = row.ra_obs, dec = row.de_obs, test = not row.force_fit,
                            model_type = pacs_model.ModelType.Particle, npart = 100000,
                            query_simbad = True, bg_sub=row.n_bg, gauss_fit = True)
         else:
