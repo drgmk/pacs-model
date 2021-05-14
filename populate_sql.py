@@ -14,6 +14,7 @@ CREATE TABLE `resolved_fitting` (
                                  `psf_obsid` int(11) NOT NULL,
                                  `resolved` tinyint(1) NOT NULL DEFAULT '0',
                                  `in_au` tinyint(1) DEFAULT NULL,
+                                 `distance float DEFAULT NULL
                                  `fit_ok` tinyint(1) DEFAULT NULL,
                                  `fstar_mjy` float DEFAULT NULL,
                                  `funres` float DEFAULT NULL,
@@ -32,7 +33,7 @@ CREATE TABLE `resolved_fitting` (
                                  `e_r2` float DEFAULT NULL,
                                  `e_cosinc` float DEFAULT NULL,
                                  `e_theta` float DEFAULT NULL,
-                                 PRIMARY KEY (`ObsId`,`name`,`include_unres`,`psf_obsid`)
+                                 PRIMARY KEY (`ObsId`,`name`,`wavelength`,`include_unres``include_alpha`,`psf_obsid`)
                                  ) ENGINE=MyISAM DEFAULT CHARSET=latin1;
 '''
 
@@ -64,7 +65,7 @@ for f in fs:
 
     print(r)
 
-    if not r['resolved']:
+    if 'param_names' not in r.keys():
         sql = ("INSERT INTO resolved_fitting "
                "(obsid, name, wavelength, "
                "resolved, psf_obsid, psffit_flux, "
@@ -93,21 +94,21 @@ for f in fs:
             e_alpha = 0
 
         sql = ("INSERT INTO resolved_fitting "
-               "(obsid, name, wavelength,"
+               "(obsid, name, wavelength, distance,"
                "resolved, include_unres, include_alpha,"
                "in_au, fit_ok, psf_obsid,"
                "psffit_flux, psffit_rms, pixel_rms,"
                "fstar_mjy, alpha, e_alpha,"
                "funres, fres, x0, y0, r1, r2, cosinc, theta,"
                "e_funres, e_fres, e_x0, e_y0, e_r1, e_r2, e_cosinc, e_theta) "
-               "VALUES ({},'{}',{},"
+               "VALUES ({},'{}',{},{},"
                "{},{},{},"
                "{},{},{},"
                "{},{},{},"
                "{},{},{},"
                "{},{},{},{},{},{},{},{},"
                "{},{},{},{},{},{},{},{})"
-               ";".format(obsid, name, r['wavelength'],
+               ";".format(obsid, name, r['wavelength'], r['distance'],
                           r['resolved'].real,r['include_unres'].real,
                           r['include_alpha'].real,
                           r['in_au'].real, r['fit_ok'].real, r['psf_obsid'],
