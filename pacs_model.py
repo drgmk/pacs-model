@@ -262,7 +262,7 @@ class Plottable:
         limits = self._get_limits()
 
         #plot NaN pixels (which will likely arise if plotting on a log scale) in black
-        cmap = plt.cm.get_cmap(cmap_name)
+        cmap = copy.copy(plt.cm.get_cmap(cmap_name))
         cmap.set_bad(color = 'k')
 
         im = ax.imshow(np.log10(image * intensity_scale) if log else image * intensity_scale,
